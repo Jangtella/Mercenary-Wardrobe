@@ -33,3 +33,12 @@ Also Armors can be toggled with top right armor icon. (I know you can just trans
 
 
 ### You can clear every cache and history in debug menu. (Top right "D" button on GUI)
+
+
+
+
+## Special thanks for these amazing mods
+
+  [**Mine and Slash**](https://www.curseforge.com/minecraft/mc-mods/mine-and-slash-reloaded) by RobertX22
+  
+  [**Minecraft Comes Alive Reborn**](https://www.curseforge.com/minecraft/mc-mods/minecraft-comes-alive-reborn) by Luke100000
