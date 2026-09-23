@@ -1,0 +1,8 @@
+Manifest-Version: 1.0
+Specification-Title: mercenary_wardrobe
+Specification-Vendor: _jang
+Specification-Version: 1
+Implementation-Title: Mercenary Wardrobe
+Implementation-Version: 1.0.2
+Implementation-Vendor: _jang
+MixinConfigs: mercenary_wardrobe.mixins.json

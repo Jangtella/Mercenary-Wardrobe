@@ -1,0 +1,546 @@
+def lightGoldenRoot = file('run/light-golden')
+def lightChunkWidth = 16.toBigDecimal()
+def lightGoldenConfig = [
+        rootDir          : lightGoldenRoot,
+        sourceDir        : file("${lightGoldenRoot}/source"),
+        vanillaDir       : file("${lightGoldenRoot}/vanilla"),
+        yaDir            : file("${lightGoldenRoot}/ya"),
+        luxDir           : file("${lightGoldenRoot}/lux"),
+        radius           : byepregenProp('byepregenLightGoldenRadius', '64'),
+        sourceBuffer     : byepregenProp('byepregenLightGoldenSourceBuffer', '192'),
+        gcFree           : byepregenProp('byepregenLightGoldenGcFree', 'true'),
+        maxMismatches    : byepregenProp('byepregenLightGoldenMaxMismatches', '50'),
+        minComparedLayers: byepregenProp('byepregenLightGoldenMinComparedLayers', '1'),
+        missingAsZero    : byepregenProp('byepregenLightGoldenMissingAsZero', 'false'),
+        requireCompleteChunks: byepregenProp('byepregenLightGoldenRequireCompleteChunks', 'true'),
+        minChunkCoverage : byepregenProp('byepregenLightGoldenMinChunkCoverage', '0.8'),
+        sourceArena      : byepregenProp('byepregenLightGoldenSourceArenaPalette', 'true'),
+        vanillaArena     : byepregenProp('byepregenLightGoldenVanillaArenaPalette', 'true'),
+        yaArena          : byepregenProp('byepregenLightGoldenYAArenaPalette', 'true'),
+        yaSchedulerWakeOnAdd: byepregenProp('byepregenYALightSchedulerWakeOnAdd', 'true'),
+]
+lightGoldenConfig.expectedWorld = byepregenProp(
+        'byepregenLightGoldenExpectedWorld',
+        file("${lightGoldenConfig.vanillaDir}/world").absolutePath
+)
+lightGoldenConfig.actualWorld = byepregenProp(
+        'byepregenLightGoldenActualWorld',
+        file("${lightGoldenConfig.yaDir}/world").absolutePath
+)
+lightGoldenConfig.sourceRadius = (
+        lightGoldenConfig.radius.toBigDecimal() + lightGoldenConfig.sourceBuffer.toBigDecimal()
+).toPlainString()
+lightGoldenConfig.relightRadius = (
+        lightGoldenConfig.radius.toBigDecimal() + lightChunkWidth
+).toPlainString()
+lightGoldenConfig.diffChunkLimit = Math.ceil(
+        lightGoldenConfig.radius.toBigDecimal().doubleValue() / lightChunkWidth.doubleValue()
+).intValue()
+lightGoldenConfig.relightJfrRepository = file("${lightGoldenConfig.rootDir}/jfr-repository")
+lightGoldenConfig.relightVanillaJfrEnabled = byepregenProp(
+        'byepregenLightGoldenRelightVanillaJfr', 'false'
+).toBoolean()
+lightGoldenConfig.relightYAJfrEnabled = byepregenProp(
+        'byepregenLightGoldenRelightYAJfr', 'false'
+).toBoolean()
+lightGoldenConfig.relightLuxJfrEnabled = byepregenProp(
+        'byepregenLightGoldenRelightLuxJfr', 'false'
+).toBoolean()
+lightGoldenConfig.relightVanillaJfr = file("${lightGoldenConfig.rootDir}/jfr/${byepregenProp(
+        'byepregenLightGoldenRelightVanillaJfrName',
+        "byepregen-light-golden-vanilla-relight-radius${byepregenSanitizeRunName(lightGoldenConfig.radius)}.jfr"
+)}")
+lightGoldenConfig.relightYAJfr = file("${lightGoldenConfig.rootDir}/jfr/${byepregenProp(
+        'byepregenLightGoldenRelightYAJfrName',
+        "byepregen-light-golden-ya-relight-radius${byepregenSanitizeRunName(lightGoldenConfig.radius)}.jfr"
+)}")
+lightGoldenConfig.relightLuxJfr = file("${lightGoldenConfig.rootDir}/jfr/${byepregenProp(
+        'byepregenLightGoldenRelightLuxJfrName',
+        "byepregen-light-golden-lux-relight-radius${byepregenSanitizeRunName(lightGoldenConfig.radius)}.jfr"
+)}")
+
+def scalableLuxRuntime = configurations.detachedConfiguration(
+        dependencies.create('curse.maven:scalablelux-1055925:6952385')
+)
+scalableLuxRuntime.transitive = false
+
+def lightFuzzRoot = file('run/light-fuzz')
+def lightRestartStandard = [
+        id        : 'Standard',
+        root      : file('run/light-restart'),
+        gcFree    : 'false',
+        prepareRun: 'runLightRestartPrepare',
+        verifyRun : 'runLightRestartVerify',
+        secondRun : 'runLightRestartVerifyAgain',
+]
+def lightRestartRaw = [
+        id        : 'Raw',
+        root      : file('run/light-restart-raw'),
+        gcFree    : 'true',
+        prepareRun: 'runLightRestartRawPrepare',
+        verifyRun : 'runLightRestartRawVerify',
+        secondRun : 'runLightRestartRawVerifyAgain',
+]
+def lightRestartConfigs = [lightRestartStandard, lightRestartRaw]
+lightRestartConfigs.each { config ->
+    config.result = file("${config.root}/light-restart.result")
+    config.baseline = file("${config.root}/light-restart.baseline")
+    config.world = file("${config.root}/world")
+}
+def lightFuzzConfig = [
+        sourceDir  : file("${lightFuzzRoot}/source"),
+        vanillaDir: file("${lightFuzzRoot}/vanilla"),
+        yaDir     : file("${lightFuzzRoot}/ya"),
+        seed      : byepregenProp('byepregenLightFuzzSeed', '0x59A11E71C0DE'),
+        variant   : byepregenProp('byepregenLightFuzzVariant', 'default'),
+        probes    : byepregenProp('byepregenLightFuzzProbes', 'false'),
+        minChunkX : byepregenProp('byepregenLightFuzzDiffMinChunkX', '-2'),
+        maxChunkX : byepregenProp('byepregenLightFuzzDiffMaxChunkX', '2'),
+        minChunkZ : byepregenProp('byepregenLightFuzzDiffMinChunkZ', '-2'),
+        maxChunkZ : byepregenProp('byepregenLightFuzzDiffMaxChunkZ', '2'),
+]
+lightFuzzConfig.minChunkCoverage = byepregenProp(
+        'byepregenLightFuzzMinChunkCoverage',
+        lightFuzzConfig.variant == 'blackout' ? '0.5' : lightGoldenConfig.minChunkCoverage
+)
+lightFuzzConfig.sourceRadius = byepregenProp(
+        'byepregenLightFuzzSourceRadius',
+        lightFuzzConfig.variant == 'blackout' ? '256' : '64'
+)
+def configureLightFuzzRun = { run, File dir ->
+    byepregenConfigureWorldgenRun(run, [dir: dir, mode: 'light_fuzz'])
+    run.systemProperty('byepregen.testWorldGen.lightFuzzSeed', lightFuzzConfig.seed)
+    run.systemProperty('byepregen.testWorldGen.lightFuzzVariant', lightFuzzConfig.variant)
+    run.systemProperty('byepregen.testWorldGen.lightFuzzProbes', lightFuzzConfig.probes)
+}
+
+def configureLightRestartRun = { run, Map config, String phase ->
+    byepregenConfigureWorldgenRun(run, [dir: config.root, mode: 'light_restart'])
+    run.systemProperty('byepregen.testWorldGen.phase', phase)
+    run.systemProperty('byepregen.testWorldGen.result', config.result.absolutePath)
+    run.systemProperty('byepregen.testWorldGen.baseline', config.baseline.absolutePath)
+}
+
+def configureLightRelightRun = { run, Map options ->
+    Map runOptions = [dir: options.dir, radius: lightGoldenConfig.radius, mode: 'relight']
+    if (options.yaSchedulerWakeOnAdd != null) {
+        runOptions.yaSchedulerWakeOnAdd = options.yaSchedulerWakeOnAdd
+    }
+    if (options.jfrEnabled) {
+        runOptions.jfrFile = options.jfrFile
+        runOptions.jfrRepository = lightGoldenConfig.relightJfrRepository
+    }
+    byepregenConfigureWorldgenRun(run, runOptions)
+}
+
+def configureLightDiffProperties = { JavaExec task, Map options ->
+    task.systemProperty 'byepregen.lightGolden.maxMismatches', lightGoldenConfig.maxMismatches
+    task.systemProperty 'byepregen.lightGolden.minComparedLayers', lightGoldenConfig.minComparedLayers
+    task.systemProperty 'byepregen.lightGolden.missingAsZero', lightGoldenConfig.missingAsZero
+    task.systemProperty 'byepregen.lightGolden.requireCompleteChunks', lightGoldenConfig.requireCompleteChunks
+    task.systemProperty 'byepregen.lightGolden.minChunkCoverage', options.minChunkCoverage
+    task.systemProperty 'byepregen.lightGolden.minChunkX', options.minChunkX
+    task.systemProperty 'byepregen.lightGolden.maxChunkX', options.maxChunkX
+    task.systemProperty 'byepregen.lightGolden.minChunkZ', options.minChunkZ
+    task.systemProperty 'byepregen.lightGolden.maxChunkZ', options.maxChunkZ
+}
+
+def prepareRelightRunTask = { String taskName, Map options ->
+    Map testOptions = [
+            dir         : options.dir,
+            yaLight     : options.yaLight,
+            arenaPalette: options.arenaPalette,
+            gcFree      : lightGoldenConfig.gcFree,
+            clearWorld  : false,
+    ]
+    tasks.matching { it.name == taskName }.configureEach {
+        byepregenUseWorldgenTestConfig(delegate, testOptions)
+        notCompatibleWithConfigurationCache(options.reason)
+        dependsOn('prepareLightGoldenRelight')
+        if (options.mustRunAfter != null) {
+            mustRunAfter(options.mustRunAfter)
+        }
+        doFirst {
+            if (options.jfrEnabled) {
+                delete(options.jfrFile)
+                options.jfrFile.parentFile.mkdirs()
+                lightGoldenConfig.relightJfrRepository.mkdirs()
+            }
+            byepregenPrepareWorldgenRunDir(testOptions)
+            if (options.modFiles != null) {
+                copy {
+                    from options.modFiles
+                    into file("${options.dir}/mods")
+                }
+            }
+        }
+    }
+    byepregenConfigureWorldgenResultTask(taskName, options.dir)
+}
+
+neoForge {
+    runs {
+        lightRestartPrepare {
+            configureLightRestartRun(delegate, lightRestartStandard, 'prepare')
+        }
+        lightRestartVerify {
+            configureLightRestartRun(delegate, lightRestartStandard, 'verify')
+        }
+        lightRestartVerifyAgain {
+            configureLightRestartRun(delegate, lightRestartStandard, 'verify')
+        }
+        lightRestartRawPrepare {
+            configureLightRestartRun(delegate, lightRestartRaw, 'prepare')
+        }
+        lightRestartRawVerify {
+            configureLightRestartRun(delegate, lightRestartRaw, 'verify')
+        }
+        lightRestartRawVerifyAgain {
+            configureLightRestartRun(delegate, lightRestartRaw, 'verify')
+        }
+        lightGoldenSource {
+            byepregenConfigureWorldgenRun(
+                    delegate,
+                    [dir: lightGoldenConfig.sourceDir, radius: lightGoldenConfig.sourceRadius]
+            )
+        }
+        lightGoldenVanilla {
+            byepregenConfigureWorldgenRun(
+                    delegate,
+                    [dir: lightGoldenConfig.vanillaDir, radius: lightGoldenConfig.radius]
+            )
+        }
+        lightGoldenYA {
+            byepregenConfigureWorldgenRun(
+                    delegate,
+                    [dir: lightGoldenConfig.yaDir, radius: lightGoldenConfig.radius]
+            )
+        }
+        lightGoldenRelightVanilla {
+            configureLightRelightRun(delegate, [
+                    dir       : lightGoldenConfig.vanillaDir,
+                    jfrEnabled: lightGoldenConfig.relightVanillaJfrEnabled,
+                    jfrFile   : lightGoldenConfig.relightVanillaJfr,
+            ])
+        }
+        lightGoldenRelightYA {
+            configureLightRelightRun(delegate, [
+                    dir                 : lightGoldenConfig.yaDir,
+                    yaSchedulerWakeOnAdd: lightGoldenConfig.yaSchedulerWakeOnAdd,
+                    jfrEnabled          : lightGoldenConfig.relightYAJfrEnabled,
+                    jfrFile             : lightGoldenConfig.relightYAJfr,
+            ])
+        }
+        lightGoldenRelightLux {
+            configureLightRelightRun(delegate, [
+                    dir       : lightGoldenConfig.luxDir,
+                    jfrEnabled: lightGoldenConfig.relightLuxJfrEnabled,
+                    jfrFile   : lightGoldenConfig.relightLuxJfr,
+            ])
+        }
+        lightFuzzSource {
+            byepregenConfigureWorldgenRun(
+                    delegate,
+                    [dir: lightFuzzConfig.sourceDir, radius: lightFuzzConfig.sourceRadius]
+            )
+        }
+        lightFuzzVanilla {
+            configureLightFuzzRun(delegate, lightFuzzConfig.vanillaDir)
+        }
+        lightFuzzYA {
+            configureLightFuzzRun(delegate, lightFuzzConfig.yaDir)
+        }
+    }
+}
+
+def assertLightRestartResult = { Map config, String expected ->
+    String result = byepregenReadRequiredResult(config.result, 'Light restart probe').trim()
+    byepregenAssertNoTestConfigFile(config.root)
+    if (result != expected) {
+        throw new GradleException("Light restart probe failed: ${result}")
+    }
+    if (config.gcFree.toBoolean()) {
+        File log = file("${config.root}/logs/latest.log")
+        String text = log.isFile() ? log.getText('UTF-8') : ''
+        if (!text.contains('Registered ByePregen GC-free worldgen chunk serializer with C2ME')
+                || !text.contains('CAN_USE_RAW_SAVE=true')) {
+            throw new GradleException("C2ME raw serializer was not exercised: ${log}")
+        }
+    }
+}
+
+def configureLightRestartServerTask = { Map options ->
+    Map config = options.config
+    Map testOptions = [
+            dir         : config.root,
+            yaLight     : 'true',
+            gcFree      : config.gcFree,
+            clearWorld  : options.prepare,
+            flatWorld   : true,
+            arenaPalette: 'false',
+    ]
+    tasks.matching { it.name == options.taskName }.configureEach {
+        byepregenUseWorldgenTestConfig(delegate, testOptions)
+        notCompatibleWithConfigurationCache('Creates or reuses a restart fixture')
+        if (options.prerequisite != null) {
+            dependsOn(options.prerequisite)
+        }
+        doFirst {
+            if (options.prepare) {
+                delete(config.root)
+            } else {
+                delete(config.result)
+            }
+            byepregenPrepareWorldgenRunDir(testOptions)
+        }
+        doLast {
+            assertLightRestartResult(config, options.prepare ? 'PREPARED' : 'PASS')
+        }
+    }
+}
+
+def registerLightRestartDiskTask = { Map options ->
+    tasks.register(options.taskName, JavaExec) {
+        group = 'verification'
+        dependsOn(options.prerequisite)
+        classpath = sourceSets.worldgenHarness.runtimeClasspath
+        mainClass.set('com.moepus.byepregen.test.LightRestartDiskVerifier')
+        args options.config.world.absolutePath, options.relightLightOn.toString()
+    }
+}
+
+lightRestartConfigs.each { config ->
+    String preparedDisk = "verifyLightRestart${config.id}PreparedDisk"
+    String firstDisk = "verifyLightRestart${config.id}FirstDisk"
+    String secondDisk = "verifyLightRestart${config.id}SecondDisk"
+    [
+            [run: config.prepareRun, prepare: true, prerequisite: null, disk: preparedDisk, lightOn: false],
+            [run: config.verifyRun, prepare: false, prerequisite: preparedDisk, disk: firstDisk, lightOn: true],
+            [run: config.secondRun, prepare: false, prerequisite: firstDisk, disk: secondDisk, lightOn: true],
+    ].each { stage ->
+        configureLightRestartServerTask([
+                taskName    : stage.run,
+                config      : config,
+                prepare     : stage.prepare,
+                prerequisite: stage.prerequisite,
+        ])
+        registerLightRestartDiskTask([
+                taskName      : stage.disk,
+                prerequisite  : stage.run,
+                config        : config,
+                relightLightOn: stage.lightOn,
+        ])
+    }
+    config.finalDiskTask = secondDisk
+}
+
+tasks.matching { it.name == lightRestartRaw.prepareRun }.configureEach {
+    mustRunAfter(lightRestartStandard.finalDiskTask)
+}
+
+tasks.register('testYALightC2MERestartStandard') {
+    group = 'verification'
+    description = 'Runs two C2ME no-tick restarts through standard chunk serialization.'
+    dependsOn(lightRestartStandard.finalDiskTask)
+}
+
+tasks.register('testYALightC2MERestartRaw') {
+    group = 'verification'
+    description = 'Runs two C2ME no-tick restarts through ByePregen raw chunk serialization.'
+    dependsOn(lightRestartRaw.finalDiskTask)
+}
+
+tasks.register('testYALightC2MERestart') {
+    group = 'verification'
+    description = 'Runs the YA+C2ME standard/raw skylight restart matrix.'
+    dependsOn('testYALightC2MERestartStandard', 'testYALightC2MERestartRaw')
+}
+
+[
+        [
+                taskName: 'runLightGoldenSource',
+                reason  : 'Prepares a disposable source terrain world before launching the server',
+                prepare : [
+                        dir         : lightGoldenConfig.sourceDir,
+                        yaLight     : 'false',
+                        arenaPalette: lightGoldenConfig.sourceArena,
+                        gcFree      : lightGoldenConfig.gcFree,
+                        clearWorld  : true,
+                ],
+        ],
+        [
+                taskName: 'runLightGoldenVanilla',
+                reason  : 'Prepares a disposable vanilla-light golden world before launching the server',
+                prepare : [
+                        dir         : lightGoldenConfig.vanillaDir,
+                        yaLight     : 'false',
+                        arenaPalette: lightGoldenConfig.vanillaArena,
+                        gcFree      : lightGoldenConfig.gcFree,
+                        clearWorld  : true,
+                ],
+        ],
+        [
+                taskName    : 'runLightGoldenYA',
+                reason      : 'Prepares a disposable YA-light golden world before launching the server',
+                mustRunAfter: 'runLightGoldenVanilla',
+                prepare     : [
+                        dir         : lightGoldenConfig.yaDir,
+                        yaLight     : 'true',
+                        arenaPalette: lightGoldenConfig.yaArena,
+                        gcFree      : lightGoldenConfig.gcFree,
+                        clearWorld  : true,
+                ],
+        ],
+].each { byepregenPrepareRunTask(it.taskName, it) }
+
+tasks.register('prepareLightGoldenRelight', JavaExec) {
+    group = 'verification'
+    description = 'Copies one source terrain world into vanilla/YA worlds and strips saved light data.'
+    dependsOn('runLightGoldenSource')
+    classpath = sourceSets.worldgenHarness.runtimeClasspath
+    mainClass.set('com.moepus.byepregen.test.LightGoldenPrepareRelight')
+    args file("${lightGoldenConfig.sourceDir}/world").absolutePath,
+            file("${lightGoldenConfig.vanillaDir}/world").absolutePath,
+            file("${lightGoldenConfig.yaDir}/world").absolutePath,
+            file("${lightGoldenConfig.luxDir}/world").absolutePath
+    systemProperty 'byepregen.lightGolden.prepareRadius', lightGoldenConfig.relightRadius
+    doFirst {
+        [
+                [dir: lightGoldenConfig.vanillaDir, yaLight: 'false', arenaPalette: lightGoldenConfig.vanillaArena],
+                [dir: lightGoldenConfig.yaDir, yaLight: 'true', arenaPalette: lightGoldenConfig.yaArena],
+                [dir: lightGoldenConfig.luxDir, yaLight: 'false', arenaPalette: lightGoldenConfig.vanillaArena],
+        ].each { options ->
+            byepregenPrepareWorldgenRunDir(options + [gcFree: lightGoldenConfig.gcFree, clearWorld: false])
+        }
+    }
+}
+
+prepareRelightRunTask('runLightGoldenRelightVanilla', [
+        reason    : 'Uses the prepared vanilla relight world without deleting it',
+        dir       : lightGoldenConfig.vanillaDir,
+        yaLight   : 'false',
+        arenaPalette: lightGoldenConfig.vanillaArena,
+        jfrEnabled: lightGoldenConfig.relightVanillaJfrEnabled,
+        jfrFile   : lightGoldenConfig.relightVanillaJfr,
+])
+prepareRelightRunTask('runLightGoldenRelightYA', [
+        reason      : 'Uses the prepared YA relight world without deleting it',
+        mustRunAfter: 'runLightGoldenRelightVanilla',
+        dir         : lightGoldenConfig.yaDir,
+        yaLight     : 'true',
+        arenaPalette: lightGoldenConfig.yaArena,
+        jfrEnabled  : lightGoldenConfig.relightYAJfrEnabled,
+        jfrFile     : lightGoldenConfig.relightYAJfr,
+])
+prepareRelightRunTask('runLightGoldenRelightLux', [
+        reason      : 'Uses the prepared ScalableLux relight world without deleting it',
+        mustRunAfter: 'runLightGoldenRelightYA',
+        dir         : lightGoldenConfig.luxDir,
+        yaLight     : 'false',
+        arenaPalette: lightGoldenConfig.vanillaArena,
+        jfrEnabled  : lightGoldenConfig.relightLuxJfrEnabled,
+        jfrFile     : lightGoldenConfig.relightLuxJfr,
+        modFiles    : scalableLuxRuntime,
+])
+
+tasks.register('diffLightGolden', JavaExec) {
+    group = 'verification'
+    description = 'Compares saved BlockLight/SkyLight section data between two generated worlds.'
+    mustRunAfter('runLightGoldenYA', 'runLightGoldenRelightYA')
+    classpath = sourceSets.worldgenHarness.runtimeClasspath
+    mainClass.set('com.moepus.byepregen.test.LightGoldenDiff')
+    args lightGoldenConfig.expectedWorld, lightGoldenConfig.actualWorld
+    configureLightDiffProperties(delegate, [
+            minChunkCoverage: lightGoldenConfig.minChunkCoverage,
+            minChunkX       : -lightGoldenConfig.diffChunkLimit,
+            maxChunkX       : lightGoldenConfig.diffChunkLimit,
+            minChunkZ       : -lightGoldenConfig.diffChunkLimit,
+            maxChunkZ       : lightGoldenConfig.diffChunkLimit,
+    ])
+}
+
+tasks.register('runLightGoldenDiff') {
+    group = 'verification'
+    description = 'Generates one source terrain world, relights copies with vanilla/YA, then diffs saved light data.'
+    dependsOn('runLightGoldenSource', 'runLightGoldenRelightVanilla', 'runLightGoldenRelightYA', 'diffLightGolden')
+}
+
+def configureLightFuzzServerTask = { Map options ->
+    byepregenPrepareRunTask(options.taskName, options)
+    tasks.matching { it.name == options.taskName }.configureEach {
+        dependsOn('prepareLightFuzzWorlds')
+    }
+}
+
+byepregenPrepareRunTask('runLightFuzzSource', [
+        reason : 'Prepares one deterministic source terrain world for vanilla/YA light fuzzing',
+        prepare: [
+                dir                       : lightFuzzConfig.sourceDir,
+                yaLight                   : 'false',
+                gcFree                    : lightGoldenConfig.gcFree,
+                clearWorld                : true,
+                flatWorld                 : lightFuzzConfig.variant != 'blackout',
+                serverRuntimeArenaPalette : 'false',
+        ],
+])
+
+tasks.register('prepareLightFuzzWorlds', JavaExec) {
+    group = 'verification'
+    description = 'Copies one source terrain world into vanilla/YA fuzz worlds and strips saved light data.'
+    dependsOn('runLightFuzzSource')
+    classpath = sourceSets.worldgenHarness.runtimeClasspath
+    mainClass.set('com.moepus.byepregen.test.LightGoldenPrepareRelight')
+    args file("${lightFuzzConfig.sourceDir}/world").absolutePath,
+            file("${lightFuzzConfig.vanillaDir}/world").absolutePath,
+            file("${lightFuzzConfig.yaDir}/world").absolutePath
+    systemProperty 'byepregen.lightGolden.prepareRadius', lightFuzzConfig.sourceRadius
+    doFirst {
+        [
+                [dir: lightFuzzConfig.vanillaDir, yaLight: 'false'],
+                [dir: lightFuzzConfig.yaDir, yaLight: 'true'],
+        ].each { options ->
+            byepregenPrepareWorldgenRunDir(options + [
+                    gcFree                  : lightGoldenConfig.gcFree,
+                    clearWorld              : false,
+                    serverRuntimeArenaPalette: 'false',
+            ])
+        }
+    }
+}
+
+[
+        [
+                taskName: 'runLightFuzzVanilla',
+                reason  : 'Prepares a disposable vanilla-light fuzz world before launching the server',
+                prepare : [dir: lightFuzzConfig.vanillaDir, yaLight: 'false', gcFree: lightGoldenConfig.gcFree, clearWorld: false, flatWorld: lightFuzzConfig.variant != 'blackout', serverRuntimeArenaPalette: 'false'],
+        ],
+        [
+                taskName    : 'runLightFuzzYA',
+                reason      : 'Prepares a disposable YA-light fuzz world before launching the server',
+                mustRunAfter: 'runLightFuzzVanilla',
+                prepare     : [dir: lightFuzzConfig.yaDir, yaLight: 'true', gcFree: lightGoldenConfig.gcFree, clearWorld: false, flatWorld: lightFuzzConfig.variant != 'blackout', serverRuntimeArenaPalette: 'false'],
+        ],
+].each { configureLightFuzzServerTask(it) }
+
+tasks.register('diffLightFuzz', JavaExec) {
+    group = 'verification'
+    description = 'Compares saved light data after deterministic block-update light fuzzing.'
+    mustRunAfter('runLightFuzzYA')
+    classpath = sourceSets.worldgenHarness.runtimeClasspath
+    mainClass.set('com.moepus.byepregen.test.LightGoldenDiff')
+    args file("${lightFuzzConfig.vanillaDir}/world").absolutePath,
+            file("${lightFuzzConfig.yaDir}/world").absolutePath
+    configureLightDiffProperties(delegate, [
+            minChunkCoverage: lightFuzzConfig.minChunkCoverage,
+            minChunkX       : lightFuzzConfig.minChunkX,
+            maxChunkX       : lightFuzzConfig.maxChunkX,
+            minChunkZ       : lightFuzzConfig.minChunkZ,
+            maxChunkZ       : lightFuzzConfig.maxChunkZ,
+    ])
+}
+
+tasks.register('runLightFuzzDiff') {
+    group = 'verification'
+    description = 'Runs deterministic block-update light fuzzing under vanilla/YA, then diffs saved light data.'
+    dependsOn('runLightFuzzVanilla', 'runLightFuzzYA', 'diffLightFuzz')
+}

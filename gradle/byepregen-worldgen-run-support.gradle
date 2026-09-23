@@ -1,0 +1,198 @@
+ext.byepregenProp = { String name, String fallback ->
+    providers.gradleProperty(name).orElse(fallback).get()
+}
+
+ext.byepregenSlashPath = { File value ->
+    value.absolutePath.replace('\\', '/')
+}
+
+ext.byepregenSanitizeRunName = { String value ->
+    value.replaceAll('[^0-9A-Za-z._-]', '_')
+}
+
+def jfrSettings = byepregenProp('byepregenJfrSettings', 'profile')
+
+ext.byepregenWorldgenTestConfig = { Map options ->
+    Object arenaPalette = options.containsKey('arenaPalette') ? options.arenaPalette : true
+    Object serverRuntimeArenaPalette = options.containsKey('serverRuntimeArenaPalette')
+            ? options.serverRuntimeArenaPalette
+            : (options.containsKey('yaLight') ? options.yaLight : false)
+    Object surfaceBiomeCache = options.containsKey('surfaceBiomeCache')
+            ? options.surfaceBiomeCache
+            : true
+    [
+            debug         : [
+                    'disable-worldgen-features': options.containsKey('noFeatures')
+                            ? options.noFeatures
+                            : false,
+            ],
+            worldgen      : [
+                    'placed-features': [
+                            enabled             : options.containsKey('enablePlacedFeatureMixin')
+                                    ? options.enablePlacedFeatureMixin
+                                    : false,
+                            'memoized-disk-plan': options.containsKey('enableMemoizedDiskPlan')
+                                    ? options.enableMemoizedDiskPlan
+                                    : true,
+                    ],
+                    arena            : [
+                            enabled                  : arenaPalette,
+                            'density-column-compiler': options.containsKey('densityColumnCompiler')
+                                    ? options.densityColumnCompiler
+                                    : true,
+                            'server-runtime'         : serverRuntimeArenaPalette,
+                    ],
+                    surface          : [
+                            'rule-compiler': options.containsKey('surfaceScalar')
+                                    ? options.surfaceScalar
+                                    : true,
+                            'biome-cache'  : surfaceBiomeCache,
+                    ],
+            ],
+            server        : [
+                    'fast-chunk-ticking': [enabled: options.containsKey('fastTick')
+                            ? options.fastTick
+                            : false],
+            ],
+            'chunk-saving': [
+                    'gc-free-worldgen': options.containsKey('gcFree') ? options.gcFree : false,
+            ],
+            lighting      : [
+                    ya: [enabled: options.containsKey('yaLight') ? options.yaLight : false],
+            ],
+    ]
+}
+
+ext.byepregenUseWorldgenTestConfig = { run, Map options ->
+    byepregenUseTestConfig(run, byepregenWorldgenTestConfig(options))
+}
+
+ext.byepregenWorldgenResult = { File dir ->
+    file("${dir}/worldgen.result")
+}
+
+ext.byepregenValidateWorldgenResult = { File dir ->
+    File result = byepregenWorldgenResult(dir)
+    String value = byepregenAssertPassResult(result, 'Worldgen harness')
+    byepregenAssertNoTestConfigFile(dir)
+    logger.lifecycle("Worldgen harness passed:\n${value.trim()}")
+}
+
+ext.byepregenConfigureWorldgenResultTask = { String taskName, File dir ->
+    tasks.matching { it.name == taskName }.configureEach {
+        File result = byepregenWorldgenResult(dir)
+        doFirst {
+            delete(result)
+        }
+        doLast {
+            byepregenValidateWorldgenResult(dir)
+        }
+    }
+}
+
+ext.byepregenConfigureWorldgenRun = { run, Map options ->
+    run.server()
+    run.sourceSet.set(sourceSets.worldgenHarness)
+    run.loadedMods.set([
+            neoForge.mods.named(project.mod_id).get(),
+            neoForge.mods.named('byepregen_worldgen_harness').get(),
+    ] as Set)
+    run.gameDirectory = options.dir
+    run.programArgument('--nogui')
+    run.systemProperty('byepregen.testWorldGen', 'true')
+    run.systemProperty(
+            'byepregen.testWorldGen.runResult',
+            byepregenWorldgenResult(options.dir).absolutePath
+    )
+    run.systemProperty(
+            'byepregen.surfaceOutputDifferential',
+            options.surfaceOutputDifferential ?: 'false'
+    )
+    run.systemProperty('byepregen.surfaceBiomeCacheProfile', options.surfaceBiomeProfile ?: 'false')
+    run.systemProperty('byepregen.verifyDfcColumn', options.verifyDfcColumn ?: 'false')
+    run.systemProperty('neoforge.enabledGameTestNamespaces', project.mod_id)
+    run.logLevel = org.slf4j.event.Level.INFO
+    run.jvmArgument("-Djava.io.tmpdir=${byepregenSlashPath(file("${options.dir}/tmp"))}")
+
+    if (options.radius != null) {
+        run.systemProperty('byepregen.testWorldGen.radius', options.radius)
+    }
+    if (options.mode != null) {
+        run.systemProperty('byepregen.testWorldGen.mode', options.mode)
+    }
+    if (options.yaSchedulerWakeOnAdd != null) {
+        run.systemProperty('byepregen.yaLightSchedulerWakeOnAdd', options.yaSchedulerWakeOnAdd)
+    }
+    if (options.jfrFile != null) {
+        run.jvmArgument(
+                "-XX:FlightRecorderOptions=stackdepth=128,repository=${byepregenSlashPath(options.jfrRepository)}"
+        )
+        run.jvmArgument(
+                "-XX:StartFlightRecording=filename=${byepregenSlashPath(options.jfrFile)}," +
+                        "settings=${jfrSettings},dumponexit=true"
+        )
+    }
+    if (options.compilationLog != null) {
+        run.jvmArgument('-XX:+UnlockDiagnosticVMOptions')
+        run.jvmArgument('-XX:+LogCompilation')
+        run.jvmArgument("-XX:LogFile=${byepregenSlashPath(options.compilationLog)}")
+    }
+}
+
+ext.byepregenPrepareWorldgenRunDir = { Map options ->
+    File dir = options.dir
+    if (options.clearWorld) {
+        delete(file("${dir}/world"))
+    }
+    prepareDisposableServer([
+            directory: dir,
+            chunkyConfig: [
+                    version                : 2,
+                    language               : 'en',
+                    continueOnRestart      : false,
+                    forceLoadExistingChunks: true,
+                    silent                 : false,
+                    updateInterval         : 1,
+            ],
+            serverProperties: [
+                    'level-seed'          : options.seed ?: 'byepregen-test-worldgen',
+                    'level-name'          : 'world',
+                    'online-mode'         : false,
+                    'max-tick-time'       : 0,
+                    'view-distance'       : 2,
+                    'simulation-distance' : 2,
+                    'enable-command-block': false,
+                    'spawn-protection'    : 0,
+                    'level-type'          : options.levelType
+                            ?: (options.flatWorld ? 'minecraft:flat' : 'minecraft:normal'),
+                    'initial-enabled-packs': options.initialEnabledPacks ?: 'vanilla',
+            ],
+    ])
+    if (options.c2meDfc != null) {
+        File c2meConfig = file("${dir}/config/c2me.toml")
+        c2meConfig.parentFile.mkdirs()
+        c2meConfig.setText(
+                "version = 3\n\n[vanillaWorldGenOptimizations]\n"
+                        + "\tuseDensityFunctionCompiler = ${options.c2meDfc}\n",
+                'UTF-8'
+        )
+    }
+}
+
+ext.byepregenPrepareRunTask = { String taskName, Map options ->
+    tasks.matching { it.name == taskName }.configureEach {
+        File result = byepregenWorldgenResult(options.prepare.dir)
+        byepregenUseWorldgenTestConfig(delegate, options.prepare)
+        notCompatibleWithConfigurationCache(options.reason)
+        if (options.mustRunAfter != null) {
+            mustRunAfter(options.mustRunAfter)
+        }
+        doFirst {
+            delete(result)
+            byepregenPrepareWorldgenRunDir(options.prepare)
+        }
+        doLast {
+            byepregenValidateWorldgenResult(options.prepare.dir)
+        }
+    }
+}
